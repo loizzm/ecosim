@@ -83,8 +83,12 @@ int main()
         // Parse the JSON request body
         nlohmann::json request_body = nlohmann::json::parse(req.body);
 
-       // Validate the request body 
-        uint32_t total_entinties = (uint32_t)request_body["plants"] + (uint32_t)request_body["herbivores"] + (uint32_t)request_body["carnivores"];
+       // Validate the request body
+        uint32_t num_plants = request_body["plants"],
+                 num_herbiv = request_body["herbivores"],
+                 num_carniv = request_body["carnivores"];
+
+        uint32_t total_entinties = num_plants + num_herbiv + num_carniv;
         if (total_entinties > NUM_ROWS * NUM_ROWS) {
         res.code = 400;
         res.body = "Too many entities";
@@ -97,7 +101,10 @@ int main()
         entity_grid.assign(NUM_ROWS, std::vector<entity_t>(NUM_ROWS, { empty, 0, 0}));
         
         // Create the entities
-        // <YOUR CODE HERE>
+        for(size_t i = 0; i != num_plants; i ++) {
+            entity_grid[]
+        }
+
 
         // Return the JSON representation of the entity grid
         nlohmann::json json_grid = entity_grid; 
