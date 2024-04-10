@@ -88,6 +88,7 @@ void iterate_herbiv(pos_t initial_pos){
         thread_done++;
         lk.unlock();
         if(thread_done == total_entinties){
+            start = false;
             thread_done_cv.notify_one();
         }
         thread_start_cv.notify_one();
@@ -105,6 +106,7 @@ void iterate_carniv(pos_t initial_pos){
         thread_done++;
         lk.unlock();
         if(thread_done == total_entinties){
+            start = false;
             thread_done_cv.notify_one();
         }
         thread_start_cv.notify_one();
@@ -122,6 +124,7 @@ void iterate_plant(pos_t initial_pos){
         thread_done++;
         lk.unlock();
         if(thread_done == total_entinties){
+            start = false;
             thread_done_cv.notify_one();
         }
         thread_start_cv.notify_one();
@@ -189,7 +192,6 @@ int main()
             thread_done_cv.wait(lk);
          }
          thread_done =0;
-         start = false;
         // Return the JSON representation of the entity grid
         nlohmann::json json_grid = entity_grid; 
         return json_grid.dump(); });
