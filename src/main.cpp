@@ -76,27 +76,56 @@ namespace nlohmann
 // Grid that contains the entities
 static std::vector<std::vector<entity_t>> entity_grid;
 
-void iterate_herbiv(pos_t pos){
-    std::unique_lock lk(m);
-    while(!start){
-        thread_start_cv.wait(lk);
-    }
-    
-}
-void iterate_carniv(pos_t pos){
-    std::unique_lock lk(m);
-    while(!start){
-        thread_start_cv.wait(lk);
-    }
-    
+
+void iterate_herbiv(pos_t initial_pos){
+    while(true){
+        std::unique_lock lk(m);
+        while(!start){
+            thread_start_cv.wait(lk);
+        }
+
+        //fim da iteração
+        thread_done++;
+        lk.unlock();
+        if(thread_done == total_entinties){
+            thread_done_cv.notify_one();
+        }
+        thread_start_cv.notify_one();
+}   
 }
 
-void iterate_plant(pos_t pos){
-    std::unique_lock lk(m);
-    while(!start){
-        thread_start_cv.wait(lk);
-    }
-    
+void iterate_carniv(pos_t initial_pos){
+    while(true){
+        std::unique_lock lk(m);
+        while(!start){
+            thread_start_cv.wait(lk);
+        }
+
+        //fim da iteração
+        thread_done++;
+        lk.unlock();
+        if(thread_done == total_entinties){
+            thread_done_cv.notify_one();
+        }
+        thread_start_cv.notify_one();
+}   
+}
+
+void iterate_plant(pos_t initial_pos){
+    while(true){
+        std::unique_lock lk(m);
+        while(!start){
+            thread_start_cv.wait(lk);
+        }
+
+        //fim da iteração
+        thread_done++;
+        lk.unlock();
+        if(thread_done == total_entinties){
+            thread_done_cv.notify_one();
+        }
+        thread_start_cv.notify_one();
+}   
 }
 
 int main()
@@ -149,10 +178,7 @@ int main()
     CROW_ROUTE(app, "/next-iteration")
         .methods("GET"_method)([]()
                                {
-        {
-        std::lock_guard lk(m);
         start = true;
-        }
         thread_start_cv.notify_all();
         // Simulate the next iteration
         // Iterate over the entity grid and simulate the behaviour of each entity
@@ -162,7 +188,8 @@ int main()
          while(thread_done != total_entinties){
             thread_done_cv.wait(lk);
          }
-         
+         thread_done =0;
+         start = false;
         // Return the JSON representation of the entity grid
         nlohmann::json json_grid = entity_grid; 
         return json_grid.dump(); });
