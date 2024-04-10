@@ -4,9 +4,18 @@
 #include "crow_all.h"
 #include "json.hpp"
 #include <random>
-
+#include <condition_variable>
+#include <iostream>
+#include <mutex>
+#include <string>
+#include <thread>
+ 
+std::mutex m;
+std::condition_variable thread_done_cv;
+int thread_done = 0;
 static const uint32_t NUM_ROWS = 15;
-
+int iteration_counter = 0;
+int total_entinties = 0;
 // Constants
 const uint32_t PLANT_MAXIMUM_AGE = 10;
 const uint32_t HERBIVORE_MAXIMUM_AGE = 50;
@@ -65,6 +74,10 @@ namespace nlohmann
 // Grid that contains the entities
 static std::vector<std::vector<entity_t>> entity_grid;
 
+void walk(pos_t pos){
+
+}
+
 int main()
 {
     crow::SimpleApp app;
@@ -95,7 +108,7 @@ int main()
         // Clear the entity grid
         entity_grid.clear();
         entity_grid.assign(NUM_ROWS, std::vector<entity_t>(NUM_ROWS, { empty, 0, 0}));
-        
+        std::cout << request_body;
         // Create the entities
         // <YOUR CODE HERE>
 
@@ -108,11 +121,15 @@ int main()
     CROW_ROUTE(app, "/next-iteration")
         .methods("GET"_method)([]()
                                {
+        thread_done_cv.notify_all();
         // Simulate the next iteration
         // Iterate over the entity grid and simulate the behaviour of each entity
         
         // <YOUR CODE HERE>
-        
+         {
+        std::unique_lock lk(m);
+        thread_done_cv.wait(lk, []{ return thread_done == total_entinties; });
+         }
         // Return the JSON representation of the entity grid
         nlohmann::json json_grid = entity_grid; 
         return json_grid.dump(); });
