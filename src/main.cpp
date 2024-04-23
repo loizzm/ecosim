@@ -97,7 +97,6 @@ void plant_routine(pos_t pos){
         exec_it.wait(lk);
        }
 
-    std::cout<<"executando planta"<< std::endl;
     if(plant.type == empty or plant.age == PLANT_MAXIMUM_AGE) {
             entity_grid[pos.i][pos.j] = {empty, 0, 0};
             return;
@@ -134,7 +133,6 @@ void herbi_routine(pos_t pos){
     while(!start) {
         exec_it.wait(lk);
      }
-    std::cout<<"executando herbivoro"<< std::endl;
     herbi = entity_grid[cur_pos.i][cur_pos.j];
     if(herbi.type == empty or herbi.energy == 0 or herbi.age == HERBIVORE_MAXIMUM_AGE) {
             entity_grid[cur_pos.i][cur_pos.j] = {empty, 0, 0};
@@ -192,7 +190,6 @@ void carni_routine(pos_t pos){
     while(!start) {
         exec_it.wait(lk);
     }
-    std::cout<<"executando carnivoro"<< std::endl;
     carni = entity_grid[cur_pos.i][cur_pos.j];
     if(carni.type == empty or carni.energy == 0 or carni.age >= CARNIVORE_MAXIMUM_AGE) {  
             entity_grid[cur_pos.i][cur_pos.j] = {empty, 0, 0};
@@ -219,7 +216,6 @@ void carni_routine(pos_t pos){
             std::vector<pos_t>::iterator idx_it = empty_pos.begin() + idx;
              pos_t child_pos = empty_pos[idx];
             if(entity_grid[child_pos.i][child_pos.j].type == empty){
-                std::cout<<"reprodução"<< std::endl;
                 entity_grid[child_pos.i][child_pos.j] = {entity_type_t::carnivore, START_ENERGY, 0};
                 //running_threads.push_back(std::thread(carni_routine, child_pos));
                 empty_pos.erase(idx_it);
@@ -292,12 +288,10 @@ int main()
         // Clear the entity grid
         entity_grid.clear();
         entity_grid.assign(NUM_ROWS, std::vector<entity_t>(NUM_ROWS, { empty, 0, 0}));
-        std::cout << request_body;
         // Create the entities
         pos_t creation_pos;
         current_it = 0;
         start = false;
-        std::cout << num_plant<< std::endl;
         for(int idx = 0; idx < num_plant; idx++) {
             creation_pos.i = rand_pos(gen);
             creation_pos.j = rand_pos(gen);
@@ -305,21 +299,18 @@ int main()
             running_threads.push_back(std::thread(plant_routine, creation_pos));
             
         }
-        std::cout << running_threads.size()<< std::endl;
         for(size_t idx = 0; idx != num_herbi; idx ++) {
             creation_pos.i = rand_pos(gen);
             creation_pos.j = rand_pos(gen);
             entity_grid[creation_pos.i][creation_pos.j] = {herbivore, START_ENERGY, 0};
             running_threads.push_back(std::thread(herbi_routine, creation_pos));
         }
-        std::cout << running_threads.size()<< std::endl;
         for(size_t idx = 0; idx != num_carni; idx ++) {
             creation_pos.i = rand_pos(gen);
             creation_pos.j = rand_pos(gen);
             entity_grid[creation_pos.i][creation_pos.j] = {carnivore, 100, 0};
             running_threads.push_back( std::thread(carni_routine, creation_pos));
         }
-        std::cout << running_threads.size()<< std::endl;
         // Return the JSON representation of the entity grid
         nlohmann::json json_grid = entity_grid; 
         res.body = json_grid.dump();
@@ -329,15 +320,12 @@ int main()
  CROW_ROUTE(app, "/next-iteration")
         .methods("GET"_method)([]()
         {
-        std::cout << running_threads.size()<< std::endl;
         if(running_threads.empty()){
             re_create_threads();
-            std::cout <<"recriando threads"<< std::endl;
         }
         start = true;
         exec_it.notify_all();
         for (int i=0; i < running_threads.size(); ++i){
-            std::cout <<"joiniing"<< std::endl;
             running_threads[i].join();
   
         }
