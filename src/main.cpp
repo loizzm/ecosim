@@ -4,26 +4,24 @@
 #include "crow_all.h"
 #include "json.hpp"
 #include <random>
-#include <condition_variable>
-#include <iostream>
-#include <mutex>
-#include <string>
 #include <thread>
- 
-std::mutex m;
-std::condition_variable thread_done_cv;
-std::condition_variable thread_start_cv;
-int thread_done = 0;
-int start =false;
+#include <condition_variable>
+#include <mutex>
+
 static const uint32_t NUM_ROWS = 15;
-int iteration_counter = 0;
-int total_entinties = 0;
+
 // Constants
 const uint32_t PLANT_MAXIMUM_AGE = 10;
 const uint32_t HERBIVORE_MAXIMUM_AGE = 50;
 const uint32_t CARNIVORE_MAXIMUM_AGE = 80;
 const uint32_t MAXIMUM_ENERGY = 200;
 const uint32_t THRESHOLD_ENERGY_FOR_REPRODUCTION = 20;
+const uint32_t MOVE_ENERGY = 5;
+const uint32_t CARNIVORE_ENERGY_GAIN = 20;
+const uint32_t HERBIVORE_ENERGY_GAIN = 30;
+const uint32_t REPRODUCTION_ENERGY = 10;
+const uint32_t START_ENERGY = 100;
+
 
 // Probabilities
 const double PLANT_REPRODUCTION_PROBABILITY = 0.2;
@@ -47,6 +45,10 @@ struct pos_t
 {
     uint32_t i;
     uint32_t j;
+
+	pos_t(int i, int j) : i(i), j(j) {};
+	pos_t() {};
+    
 };
 
 struct entity_t
@@ -76,61 +78,186 @@ namespace nlohmann
 // Grid that contains the entities
 static std::vector<std::vector<entity_t>> entity_grid;
 
+std::default_random_engine gen;
+std::uniform_int_distribution<> rand_pos(0, NUM_ROWS - 1);
+std::uniform_real_distribution<> mp_rand(0.0, 1.0);
 
-void iterate_herbiv(pos_t initial_pos){
-    while(true){
-        std::unique_lock lk(m);
-        while(!start){
-            thread_start_cv.wait(lk);
-        }
+std::vector<std::thread> running_threads;
+std::atomic<int> current_it = 0;
 
-        //fim da iteração
-        thread_done++;
-        lk.unlock();
-        if(thread_done == total_entinties){
-            start = false;
-            thread_done_cv.notify_one();
+std::mutex exec_it_mtx;
+std::condition_variable exec_it;
+std::atomic<bool> start;
+
+void plant_routine(pos_t pos){
+    entity_t& plant = entity_grid[pos.i][pos.j];
+    int my_it = current_it;
+    std::unique_lock lk(exec_it_mtx);
+    while(!start) {
+        exec_it.wait(lk);
+       }
+
+    std::cout<<"executando planta"<< std::endl;
+    if(plant.type == empty or plant.age == PLANT_MAXIMUM_AGE) {
+            entity_grid[pos.i][pos.j] = {empty, 0, 0};
+            return;
         }
-        thread_start_cv.notify_one();
-}   
+    std::vector<pos_t> empty_pos;
+     for(const pos_t& pos_to_verify : {pos_t(pos.i, pos.j+1), pos_t(pos.i,pos.j-1), pos_t(pos.i+1,pos.j), pos_t(pos.i-1,pos.j)}) {
+
+            if(!(pos_to_verify.i >= 0 and pos_to_verify.i < NUM_ROWS and pos_to_verify.j >= 0 and pos_to_verify.j < NUM_ROWS)) {
+				continue;
+            }
+            
+            if(entity_grid[pos_to_verify.i][pos_to_verify.j].type == empty)
+                empty_pos.push_back(pos_to_verify);
+        }
+        
+        if(mp_rand(gen) < PLANT_REPRODUCTION_PROBABILITY and !empty_pos.empty()) {
+
+            size_t idx = mp_rand(gen) * empty_pos.size();
+            std::vector<pos_t>::iterator idx_it = empty_pos.begin() + idx;
+
+            pos_t child_pos = empty_pos[idx];
+
+            entity_grid[child_pos.i][child_pos.j] = {entity_type_t::plant, 0, 0};
+           // running_threads.push_back(std::thread(plant_routine, child_pos));
+        }
+        
+        plant.age ++;
 }
 
-void iterate_carniv(pos_t initial_pos){
-    while(true){
-        std::unique_lock lk(m);
-        while(!start){
-            thread_start_cv.wait(lk);
+void herbi_routine(pos_t pos){
+    pos_t& cur_pos = pos;
+    entity_t herbi ;
+    std::unique_lock lk(exec_it_mtx);
+    while(!start) {
+        exec_it.wait(lk);
+     }
+    std::cout<<"executando herbivoro"<< std::endl;
+    herbi = entity_grid[cur_pos.i][cur_pos.j];
+    if(herbi.type == empty or herbi.energy == 0 or herbi.age == HERBIVORE_MAXIMUM_AGE) {
+            entity_grid[cur_pos.i][cur_pos.j] = {empty, 0, 0};
+            return;
+    }
+
+    std::vector<pos_t> empty_pos;
+    for(const pos_t& pos_to_verify : {pos_t(cur_pos.i, cur_pos.j+1), pos_t(cur_pos.i,cur_pos.j-1), pos_t(cur_pos.i+1,cur_pos.j), pos_t(cur_pos.i-1,cur_pos.j)}) {
+
+            if(!(pos_to_verify.i >= 0 and pos_to_verify.i < NUM_ROWS and pos_to_verify.j >= 0 and pos_to_verify.j < NUM_ROWS)) {
+				continue;
+            }
+
+            if(entity_grid[pos_to_verify.i][pos_to_verify.j].type == plant and mp_rand(gen) < HERBIVORE_EAT_PROBABILITY) {
+                entity_grid[pos_to_verify.i][pos_to_verify.j] = {empty, 0, 0};
+                herbi.energy += HERBIVORE_ENERGY_GAIN;
+            }
+            
+            if(entity_grid[pos_to_verify.i][pos_to_verify.j].type == empty)
+                empty_pos.push_back(pos_to_verify);
         }
 
-        //fim da iteração
-        thread_done++;
-        lk.unlock();
-        if(thread_done == total_entinties){
-            start = false;
-            thread_done_cv.notify_one();
+        if(mp_rand(gen) < HERBIVORE_REPRODUCTION_PROBABILITY and herbi.energy > THRESHOLD_ENERGY_FOR_REPRODUCTION and !empty_pos.empty()) {
+            size_t idx = mp_rand(gen) * empty_pos.size();
+            std::vector<pos_t>::iterator idx_it = empty_pos.begin() + idx;
+            pos_t child_pos = empty_pos[idx];
+            if(entity_grid[child_pos.i][child_pos.j].type == empty){
+                entity_grid[child_pos.i][child_pos.j] = {entity_type_t::herbivore, START_ENERGY, 0};
+                //running_threads.push_back(std::thread(herbi_routine, child_pos));
+                empty_pos.erase(idx_it);
+                herbi.energy -= REPRODUCTION_ENERGY;
         }
-        thread_start_cv.notify_one();
-}   
+        }
+
+        if(mp_rand(gen) < HERBIVORE_MOVE_PROBABILITY and !empty_pos.empty()) {
+            size_t idx = mp_rand(gen) * empty_pos.size();
+            pos_t next_pos = empty_pos[idx];
+            if(entity_grid[next_pos.i][next_pos.j].type == empty){
+                herbi.energy -= MOVE_ENERGY;
+                entity_grid[next_pos.i][next_pos.j] = {herbi.type, herbi.energy, herbi.age};
+                entity_grid[cur_pos.i][cur_pos.j] = {empty, 0, 0};
+                cur_pos = next_pos;
+
+            }
+        }
+
+       entity_grid[cur_pos.i][cur_pos.j].age++;
 }
 
-void iterate_plant(pos_t initial_pos){
-    while(true){
-        std::unique_lock lk(m);
-        while(!start){
-            thread_start_cv.wait(lk);
+
+void carni_routine(pos_t pos){
+    pos_t& cur_pos = pos;
+    entity_t carni;
+    std::unique_lock lk(exec_it_mtx);
+    while(!start) {
+        exec_it.wait(lk);
+    }
+    std::cout<<"executando carnivoro"<< std::endl;
+    carni = entity_grid[cur_pos.i][cur_pos.j];
+    if(carni.type == empty or carni.energy == 0 or carni.age >= CARNIVORE_MAXIMUM_AGE) {  
+            entity_grid[cur_pos.i][cur_pos.j] = {empty, 0, 0};
+            return;
+    }
+    std::vector<pos_t> empty_pos;
+    for(const pos_t& pos_to_verify : {pos_t(cur_pos.i, cur_pos.j+1), pos_t(cur_pos.i,cur_pos.j-1), pos_t(cur_pos.i+1,cur_pos.j), pos_t(cur_pos.i-1,cur_pos.j)}) {
+
+            if(!(pos_to_verify.i >= 0 and pos_to_verify.i < NUM_ROWS and pos_to_verify.j >= 0 and pos_to_verify.j < NUM_ROWS)) {
+				continue;
+            }
+
+            if(entity_grid[pos_to_verify.i][pos_to_verify.j].type == herbivore) {
+                entity_grid[pos_to_verify.i][pos_to_verify.j] = {empty, 0, 0};
+                carni.energy += CARNIVORE_ENERGY_GAIN;
+            }
+            
+            if(entity_grid[pos_to_verify.i][pos_to_verify.j].type == empty)
+                empty_pos.push_back(pos_to_verify);
         }
 
-        //fim da iteração
-        thread_done++;
-        lk.unlock();
-        if(thread_done == total_entinties){
-            start = false;
-            thread_done_cv.notify_one();
+        if(mp_rand(gen) < CARNIVORE_REPRODUCTION_PROBABILITY and carni.energy > THRESHOLD_ENERGY_FOR_REPRODUCTION and !empty_pos.empty()) {
+            size_t idx = mp_rand(gen) * empty_pos.size();
+            std::vector<pos_t>::iterator idx_it = empty_pos.begin() + idx;
+             pos_t child_pos = empty_pos[idx];
+            if(entity_grid[child_pos.i][child_pos.j].type == empty){
+                std::cout<<"reprodução"<< std::endl;
+                entity_grid[child_pos.i][child_pos.j] = {entity_type_t::carnivore, START_ENERGY, 0};
+                //running_threads.push_back(std::thread(carni_routine, child_pos));
+                empty_pos.erase(idx_it);
+                carni.energy -= REPRODUCTION_ENERGY;
         }
-        thread_start_cv.notify_one();
-}   
+        }
+
+        if(mp_rand(gen) < CARNIVORE_MOVE_PROBABILITY and !empty_pos.empty()) {
+            size_t idx = mp_rand(gen) * empty_pos.size();
+            pos_t next_pos = empty_pos[idx];
+            if(entity_grid[next_pos.i][next_pos.j].type == empty){
+                carni.energy -= MOVE_ENERGY;
+                entity_grid[next_pos.i][next_pos.j] = {carni.type, carni.energy, carni.age};
+                entity_grid[cur_pos.i][cur_pos.j] = {empty, 0, 0};
+                cur_pos = next_pos;
+
+            }
+        }
+        entity_grid[cur_pos.i][cur_pos.j].age++;
+
 }
 
+void re_create_threads() {
+    start=false;
+    // Criar novas threads com base no estado atual da matriz
+    for (size_t i = 0; i < entity_grid.size(); ++i) {
+        for (size_t j = 0; j < entity_grid[i].size(); ++j) {
+            entity_t entity = entity_grid[i][j];
+            if (entity.type == plant) {
+                running_threads.push_back(std::thread(plant_routine, pos_t(i, j)));
+            } else if (entity.type == herbivore) {
+                running_threads.push_back(std::thread(herbi_routine, pos_t(i, j)));
+            } else if (entity.type == carnivore) {
+                running_threads.push_back(std::thread(carni_routine, pos_t(i, j)));
+            }
+        }
+    }
+}
 int main()
 {
     crow::SimpleApp app;
@@ -150,11 +277,11 @@ int main()
         nlohmann::json request_body = nlohmann::json::parse(req.body);
 
        // Validate the request body
-        uint32_t num_plants = request_body["plants"],
-                 num_herbiv = request_body["herbivores"],
-                 num_carniv = request_body["carnivores"];
+        uint32_t num_plant = request_body["plants"],
+                 num_herbi = request_body["herbivores"],
+                 num_carni = request_body["carnivores"];
 
-        uint32_t total_entinties = num_plants + num_herbiv + num_carniv;
+        uint32_t total_entinties = num_plant + num_herbi + num_carni;
         if (total_entinties > NUM_ROWS * NUM_ROWS) {
         res.code = 400;
         res.body = "Too many entities";
@@ -167,31 +294,55 @@ int main()
         entity_grid.assign(NUM_ROWS, std::vector<entity_t>(NUM_ROWS, { empty, 0, 0}));
         std::cout << request_body;
         // Create the entities
-        for(size_t i = 0; i != num_plants; i ++) {
-            entity_grid[]
+        pos_t creation_pos;
+        current_it = 0;
+        start = false;
+        std::cout << num_plant<< std::endl;
+        for(int idx = 0; idx < num_plant; idx++) {
+            creation_pos.i = rand_pos(gen);
+            creation_pos.j = rand_pos(gen);
+            entity_grid[creation_pos.i][creation_pos.j] = {plant, START_ENERGY, 0};
+            running_threads.push_back(std::thread(plant_routine, creation_pos));
+            
         }
-
-
+        std::cout << running_threads.size()<< std::endl;
+        for(size_t idx = 0; idx != num_herbi; idx ++) {
+            creation_pos.i = rand_pos(gen);
+            creation_pos.j = rand_pos(gen);
+            entity_grid[creation_pos.i][creation_pos.j] = {herbivore, START_ENERGY, 0};
+            running_threads.push_back(std::thread(herbi_routine, creation_pos));
+        }
+        std::cout << running_threads.size()<< std::endl;
+        for(size_t idx = 0; idx != num_carni; idx ++) {
+            creation_pos.i = rand_pos(gen);
+            creation_pos.j = rand_pos(gen);
+            entity_grid[creation_pos.i][creation_pos.j] = {carnivore, 100, 0};
+            running_threads.push_back( std::thread(carni_routine, creation_pos));
+        }
+        std::cout << running_threads.size()<< std::endl;
         // Return the JSON representation of the entity grid
         nlohmann::json json_grid = entity_grid; 
         res.body = json_grid.dump();
         res.end(); });
 
     // Endpoint to process HTTP GET requests for the next simulation iteration
-    CROW_ROUTE(app, "/next-iteration")
+ CROW_ROUTE(app, "/next-iteration")
         .methods("GET"_method)([]()
-                               {
+        {
+        std::cout << running_threads.size()<< std::endl;
+        if(running_threads.empty()){
+            re_create_threads();
+            std::cout <<"recriando threads"<< std::endl;
+        }
         start = true;
-        thread_start_cv.notify_all();
-        // Simulate the next iteration
-        // Iterate over the entity grid and simulate the behaviour of each entity
-        
-        // <YOUR CODE HERE>
-        std::unique_lock lk(m);
-         while(thread_done != total_entinties){
-            thread_done_cv.wait(lk);
-         }
-         thread_done =0;
+        exec_it.notify_all();
+        for (int i=0; i < running_threads.size(); ++i){
+            std::cout <<"joiniing"<< std::endl;
+            running_threads[i].join();
+  
+        }
+        running_threads.clear();
+
         // Return the JSON representation of the entity grid
         nlohmann::json json_grid = entity_grid; 
         return json_grid.dump(); });
